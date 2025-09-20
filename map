@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShipsDNA - Simple AIS Map</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <style>
+        /* Basic page styles */
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+        }
+
+        /* Set the map container to fill the screen */
+        #map {
+            width: 100%;
+            height: 100%;
+            background-color: #1a1a1a; /* Dark background for when tiles are loading */
+        }
+
+        /* Custom popup styles to match the dark theme */
+        .leaflet-popup-content-wrapper {
+            background: rgba(10, 10, 10, 0.85);
+            color: #e0e0e0;
+            border: 1px solid #008a23;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 255, 65, 0.3);
+        }
+        .leaflet-popup-content {
+            font-family: 'Roboto Mono', monospace;
+        }
+        .leaflet-popup-content h3 {
+            color: #00ff41;
+            margin: 0 0 8px 0;
+            font-size: 16px;
+        }
+        .leaflet-popup-content p {
+            margin: 4px 0;
+            font-size: 12px;
+        }
+        .leaflet-popup-tip {
+            background: rgba(10, 10, 10, 0.85);
+        }
+        .leaflet-popup-close-button {
+            color: #e0e0e0 !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+        // --- Configuration ---
+        // NOTE: You still need a free API key from a map provider.
+        // Get one from https://www.maptiler.com/cloud/
+        const MAPTILER_API_KEY = 'onN3ELJ8eYBkrJfTNMbC';
+
+        // --- Mock Data ---
+        // This is the same sample data we used before.
+        const mockVessels = [
+          {
+            "vessel_name": "BLUE STAR NAXOS", "mmsi": 239923000, "imo": 9241786, "vtype": 6, "lat": 37.94756, "lng": 23.64045, "course": 275, "speed": 0.1, "nav_status": 5, "received": "2025-09-20T16:03:06Z"
+          },
+          {
+            "vessel_name": "EVER GIVEN", "mmsi": 353136000, "imo": 9811000, "vtype": 7, "lat": 30.027, "lng": 32.58, "course": 160, "speed": 15.2, "nav_status": 0, "received": "2025-09-20T16:04:15Z"
+          },
+          {
+            "vessel_name": "SIRIUS STAR", "mmsi": 636013409, "imo": 9384198, "vtype": 8, "lat": 24.25, "lng": 58.7, "course": 225, "speed": 12.8, "nav_status": 0, "received": "2025-09-20T16:02:50Z"
+          },
+          {
+            "vessel_name": "WONDER OF THE SEAS", "mmsi": 311001000, "imo": 9837947, "vtype": 6, "lat": 25.761681, "lng": -80.191788, "course": 90, "speed": 18.0, "nav_status": 0, "received": "2025-09-20T16:05:00Z"
+          }
+        ];
+
+        const vesselTypeMapping = {
+            6: 'Passenger/Cruise', 7: 'Cargo/Container', 8: 'Tanker', 9: 'Other'
+        };
+
+        // --- Map Initialization ---
+        if (MAPTILER_API_KEY === 'YOUR_MAPTILER_API_KEY_HERE') {
+            document.getElementById('map').innerHTML = `
+                <div style="height: 100%; display: flex; align-items: center; justify-content: center; background-color: #333; color: white;">
+                    <h2>Please provide a MapTiler API key in the script to display the map.</h2>
+                </div>`;
+        } else {
+            // Initialize the map and set its view to a central location
+            const map = L.map('map').setView([45, 10], 2.5);
+
+            // Add the dark map layer from MapTiler
+            L.tileLayer(
+                `https://api.maptiler.com/maps/dataviz-dark/{z}/{x}/{y}.png?key=${MAPTILER_API_KEY}`, {
+                    attribution: '<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>',
+                }
+            ).addTo(map);
+
+            // --- Plot Vessels ---
+            mockVessels.forEach(vessel => {
+                // Create a custom SVG icon that can be rotated
+                const iconHtml = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="#00ff41" style="transform: rotate(${vessel.course}deg);"><path d="M12 2L2.5 21.5h19L12 2z"/></svg>`;
+
+                const customIcon = L.divIcon({
+                    html: iconHtml,
+                    className: '', // No default styles
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12] // Center of the icon
+                });
+                
+                // Create the popup content
+                const popupContent = `
+                    <h3>${vessel.vessel_name}</h3>
+                    <p><strong>MMSI:</strong> ${vessel.mmsi}</p>
+                    <p><strong>Type:</strong> ${vesselTypeMapping[vessel.vtype] || 'Unknown'}</p>
+                    <p><strong>Speed:</strong> ${vessel.speed} knots</p>
+                `;
+
+                // Add marker to the map
+                L.marker([vessel.lat, vessel.lng], { icon: customIcon })
+                    .addTo(map)
+                    .bindPopup(popupContent);
+            });
+        }
+    </script>
+
+</body>
+</html>
