@@ -312,7 +312,6 @@
             if (query.length < 3) return alert('Please enter at least 3 characters to search for a port.');
             document.getElementById('loader').style.display = 'block';
 
-            // Step 1: Search for the port to get its ID
             const portSearchUrl = `https://api.myshiptracking.com/api/v2/port/search?name=${encodeURIComponent(query)}`;
             const portResults = await apiRequest(portSearchUrl, `port search for "${query}"`);
 
@@ -323,7 +322,6 @@
             }
             const portId = portResults[0].port_id;
 
-            // Step 2: Get all vessels in that port
             const vesselsInPortUrl = `https://api.myshiptracking.com/api/v2/port/inport?port_id=${portId}`;
             const vesselsInPort = await apiRequest(vesselsInPortUrl, `vessels in port ${portResults[0].name}`);
 
@@ -333,27 +331,44 @@
                 return;
             }
             
-            // Step 3: Fetch the positions for those vessels
             await fetchVesselDetails(vesselsInPort.map(v => v.mmsi), true);
             document.getElementById('loader').style.display = 'none';
         }
 
+        // --- BATCHING LOGIC to handle API limit of 100 vessels per request ---
         async function fetchVesselDetails(mmsiList, isNewSearch) {
-            const targetApiUrl = `https://api.myshiptracking.com/api/v2/vessel/bulk?mmsi=${mmsiList.join(',')}`;
-            const vesselDetails = await apiRequest(targetApiUrl, "vessel details");
-            if (vesselDetails) {
-                currentVessels = vesselDetails;
-                plotVessels(currentVessels);
-                if (isNewSearch) {
-                    historicalTrackLayer.clearLayers();
-                    const validCoords = currentVessels.map(v => [v.lat, v.lng]).filter(coords => coords[0] != null && coords[1] != null);
-                    if (validCoords.length > 0) {
-                        const bounds = L.latLngBounds(validCoords);
-                        map.flyToBounds(bounds, { padding: [50, 50] });
+            const BATCH_SIZE = 100;
+            const batches = [];
+            for (let i = 0; i < mmsiList.length; i += BATCH_SIZE) {
+                batches.push(mmsiList.slice(i, i + BATCH_SIZE));
+            }
+
+            try {
+                const batchPromises = batches.map(batch => {
+                    const targetApiUrl = `https://api.myshiptracking.com/api/v2/vessel/bulk?mmsi=${batch.join(',')}`;
+                    return apiRequest(targetApiUrl, "vessel details batch");
+                });
+                
+                const results = await Promise.all(batchPromises);
+                const vesselDetails = results.flat().filter(Boolean); // Flatten arrays and remove any null results from failed batches
+
+                if (vesselDetails.length > 0) {
+                    currentVessels = vesselDetails;
+                    plotVessels(currentVessels);
+                    if (isNewSearch) {
+                        historicalTrackLayer.clearLayers();
+                        const validCoords = currentVessels.map(v => [v.lat, v.lng]).filter(coords => coords[0] != null && coords[1] != null);
+                        if (validCoords.length > 0) {
+                            const bounds = L.latLngBounds(validCoords);
+                            map.flyToBounds(bounds, { padding: [50, 50] });
+                        }
+                        document.getElementById('vesselType').disabled = false;
+                        addResetButton();
                     }
-                    document.getElementById('vesselType').disabled = false;
-                    addResetButton();
                 }
+            } catch (error) {
+                 // handleFetchError is already called inside apiRequest, so just log here.
+                 console.error("An error occurred during batch processing of vessel details.");
             }
         }
 
@@ -395,8 +410,10 @@
         async function fetchVesselTrack(mmsi) {
             document.getElementById('loader').style.display = 'block';
             map.closePopup();
-            const todate = new Date().toISOString();
-            const fromdate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+            
+            const todate = new Date().toISOString().split('.')[0] + 'Z';
+            const fromdate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('.')[0] + 'Z';
+
             const targetApiUrl = `https://api.myshiptracking.com/api/v2/vessel/track?mmsi=${mmsi}&fromdate=${fromdate}&todate=${todate}`;
             const trackData = await apiRequest(targetApiUrl, `historical track for MMSI ${mmsi}`);
             if (trackData && trackData.length > 0) {
