@@ -78,6 +78,10 @@
             background-color: #1a1a1a;
             color: #e0e0e0;
         }
+        .control-panel select:disabled {
+            background-color: #333;
+            cursor: not-allowed;
+        }
         .control-panel label {
             display: block;
             margin-bottom: 5px;
@@ -136,9 +140,8 @@
 
         // --- Global Variables ---
         let map;
-        let allVessels = []; // To store the initial zone dataset
+        let currentVessels = []; // Holds the currently displayed vessels (from search)
         let vesselMarkers = L.layerGroup(); // Layer to hold all vessel markers
-        let isSearchView = false; // Flag to track if we're in a search view
 
         // --- Mappings ---
         const vesselTypeMapping = {
@@ -164,7 +167,8 @@
         });
 
         function initializeMap() {
-            map = L.map('map').setView([50.5, 1.0], 7); // Centered on the English Channel
+            // Set initial view to a global perspective
+            map = L.map('map').setView([20, 0], 2); 
 
             L.tileLayer(
                 `https://api.maptiler.com/maps/dataviz-dark/{z}/{x}/{y}.png?key=${MAPTILER_API_KEY}`, {
@@ -174,7 +178,7 @@
 
             vesselMarkers.addTo(map);
             addControls();
-            fetchVesselsInZone();
+            // REMOVED: No initial fetch of vessels
         }
         
         function addControls() {
@@ -184,10 +188,10 @@
                     container.innerHTML = `
                         <h3>Ship Tracking</h3>
                         <label for="search">Search (IMO/MMSI/Name)</label>
-                        <input type="text" id="search" placeholder="e.g., EVER GIVEN">
+                        <input type="text" id="search" placeholder="Search vessel to begin...">
                         
                         <label for="vesselType">Filter by Type</label>
-                        <select id="vesselType">
+                        <select id="vesselType" disabled>
                             <option value="all">All Types</option>
                             <option value="6">Passenger/Cruise</option>
                             <option value="7">Cargo/Container</option>
@@ -229,27 +233,8 @@
                 }
             } catch (error) {
                 handleFetchError(error, context);
-                return null; // Return null to indicate failure
+                return null;
             }
-        }
-
-        async function fetchVesselsInZone() {
-            isSearchView = false;
-            const loader = document.getElementById('loader');
-            loader.style.display = 'block';
-            document.getElementById('reset-button-container').innerHTML = '';
-
-            const minlon = -5.0, maxlon = 5.0, minlat = 48.5, maxlat = 52.5;
-            const targetApiUrl = `https://api.myshiptracking.com/api/v2/vessel/zone?minlon=${minlon}&maxlon=${maxlon}&minlat=${minlat}&maxlat=${maxlat}`;
-            
-            const data = await apiRequest(targetApiUrl, "vessels in zone");
-            
-            if (data) {
-                allVessels = data;
-                plotVessels(allVessels);
-                map.setView([50.5, 1.0], 7);
-            }
-            loader.style.display = 'none';
         }
 
         async function searchVessels(query) {
@@ -257,7 +242,6 @@
                 alert('Please enter at least 3 characters to search.');
                 return;
             }
-            isSearchView = true;
             const loader = document.getElementById('loader');
             loader.style.display = 'block';
 
@@ -280,11 +264,15 @@
             const vesselDetails = await apiRequest(targetApiUrl, "vessel details");
 
             if (vesselDetails) {
-                plotVessels(vesselDetails);
-                const bounds = L.latLngBounds(vesselDetails.map(v => [v.lat, v.lng]).filter(coords => coords[0] != null && coords[1] != null));
+                currentVessels = vesselDetails; // Store for filtering
+                plotVessels(currentVessels);
+                
+                const bounds = L.latLngBounds(currentVessels.map(v => [v.lat, v.lng]).filter(coords => coords[0] != null && coords[1] != null));
                 if (bounds.isValid()) {
                     map.flyToBounds(bounds, { padding: [50, 50] });
                 }
+                
+                document.getElementById('vesselType').disabled = false; // Enable filter
                 addResetButton();
             }
         }
@@ -314,24 +302,27 @@
         }
         
         function filterVessels(vesselType) {
-            if (isSearchView) {
-                alert("Cannot filter in search view. Please reset to see all vessels in the zone.");
-                document.getElementById('vesselType').value = 'all';
-                return;
-            }
             let filteredVessels = (vesselType === 'all')
-                ? allVessels
-                : allVessels.filter(vessel => vessel.vtype == parseInt(vesselType));
+                ? currentVessels
+                : currentVessels.filter(vessel => vessel.vtype == parseInt(vesselType));
             plotVessels(filteredVessels);
+        }
+        
+        function resetMapView() {
+            document.getElementById('search').value = '';
+            document.getElementById('vesselType').value = 'all';
+            document.getElementById('vesselType').disabled = true;
+            document.getElementById('reset-button-container').innerHTML = '';
+            
+            vesselMarkers.clearLayers();
+            currentVessels = [];
+            map.flyTo([20, 0], 2); // Fly back to global view
         }
         
         function addResetButton() {
             const container = document.getElementById('reset-button-container');
             container.innerHTML = '<button id="reset-view">Reset View</button>';
-            document.getElementById('reset-view').addEventListener('click', () => {
-                document.getElementById('search').value = '';
-                fetchVesselsInZone();
-            });
+            document.getElementById('reset-view').addEventListener('click', resetMapView);
         }
         
         function handleFetchError(error, context) {
