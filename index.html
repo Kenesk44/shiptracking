@@ -142,14 +142,12 @@
 
         // --- Mappings ---
         const vesselTypeMapping = {
-            // Updated to include more types from the API docs
             0: 'Not available', 1: 'Reserved', 2: 'Wing in ground', 3: 'Special Category',
             4: 'High speed craft', 5: 'Special Category', 6: 'Passenger', 7: 'Cargo', 8: 'Tanker',
             9: 'Other'
         };
         const vesselTypeColors = {
             4: '#ff4da6', 6: '#ff4da6', 7: '#4da6ff', 8: '#ffa64d', 9: '#cccccc',
-            // Default colors for other types
             0: '#cccccc', 1: '#cccccc', 2: '#cccccc', 3: '#cccccc', 5: '#cccccc'
         };
 
@@ -218,21 +216,18 @@
             const proxyUrl = `${PROXY_WORKER_URL}?url=${encodeURIComponent(targetApiUrl)}`;
             try {
                 const response = await fetch(proxyUrl);
-                const result = await response.json(); // Try to parse JSON even on error
+                const result = await response.json(); 
 
                 if (!response.ok) {
-                    // If response is not ok, use the parsed JSON message if available
                     throw new Error(result.message || `Proxy Error: ${response.statusText}`);
                 }
 
                 if (result.status === 'success') {
                     return result.data;
                 } else {
-                    // API returned success=false, throw the API's message
                     throw new Error(result.message || 'An unknown API error occurred.');
                 }
             } catch (error) {
-                // This catches fetch network errors and the thrown errors from above
                 handleFetchError(error, context);
                 return null; // Return null to indicate failure
             }
@@ -271,7 +266,7 @@
 
             if (searchResults && searchResults.length > 0) {
                 await fetchVesselDetails(searchResults);
-            } else if (searchResults) { // search was successful but returned no results
+            } else if (searchResults) { 
                 alert(`No vessels found for "${query}".`);
                 vesselMarkers.clearLayers();
             }
@@ -286,7 +281,7 @@
 
             if (vesselDetails) {
                 plotVessels(vesselDetails);
-                const bounds = L.latLngBounds(vesselDetails.map(v => [v.lat, v.lng]));
+                const bounds = L.latLngBounds(vesselDetails.map(v => [v.lat, v.lng]).filter(coords => coords[0] != null && coords[1] != null));
                 if (bounds.isValid()) {
                     map.flyToBounds(bounds, { padding: [50, 50] });
                 }
@@ -341,7 +336,6 @@
         
         function handleFetchError(error, context) {
             console.error(`Failed to fetch ${context}:`, error);
-            // Display the specific error message now
             alert(`An error occurred while fetching ${context}: ${error.message}`);
         }
 
