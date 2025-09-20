@@ -55,6 +55,24 @@
         .leaflet-popup-close-button {
             color: #e0e0e0 !important;
         }
+        .popup-button {
+            width: 100%;
+            padding: 8px;
+            margin-top: 10px;
+            border-radius: 4px;
+            border: 1px solid #008a23;
+            background-color: #008a23;
+            color: #e0e0e0;
+            font-weight: bold;
+            cursor: pointer;
+            text-align: center;
+            transition: background-color 0.2s;
+        }
+        .popup-button:hover {
+            background-color: #00ff41;
+            color: #1a1a1a;
+        }
+
 
         /* Styles for the UI control panel */
         .leaflet-top.leaflet-right {
@@ -141,13 +159,14 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script>
         // --- Configuration ---
-        const MAPTILER_API_KEY = 'onN3ELJ8eYBkrJfTNMbC';
-        const PROXY_WORKER_URL = 'https://shipsdna-proxy.falling-flower-03ee.workers.dev/'; 
+        const MAPTILER_API_KEY = 'YOUR_MAPTILER_API_KEY_HERE';
+        const PROXY_WORKER_URL = 'YOUR_CLOUDFLARE_WORKER_URL_HERE'; 
 
         // --- Global Variables ---
         let map;
-        let currentVessels = []; // Holds the currently displayed vessels (from search)
-        let vesselMarkers = L.layerGroup(); // Layer to hold all vessel markers
+        let currentVessels = [];
+        let vesselMarkers = L.layerGroup();
+        let historicalTrackLayer = L.layerGroup();
 
         // --- Mappings ---
         const vesselTypeMapping = {
@@ -182,6 +201,7 @@
             ).addTo(map);
 
             vesselMarkers.addTo(map);
+            historicalTrackLayer.addTo(map);
             addControls();
         }
         
@@ -246,7 +266,7 @@
             const searchResults = await apiRequest(targetApiUrl, "vessel search");
 
             if (searchResults && searchResults.length > 0) {
-                await fetchVesselDetails(searchResults, true); // true = this is a new search
+                await fetchVesselDetails(searchResults, true);
             } else if (searchResults) { 
                 alert(`No vessels found for "${query}".`);
                 vesselMarkers.clearLayers();
@@ -265,6 +285,7 @@
                 plotVessels(currentVessels);
                 
                 if (isNewSearch) {
+                    historicalTrackLayer.clearLayers();
                     const bounds = L.latLngBounds(currentVessels.map(v => [v.lat, v.lng]).filter(coords => coords[0] != null && coords[1] != null));
                     if (bounds.isValid()) {
                         map.flyToBounds(bounds, { padding: [50, 50] });
@@ -288,14 +309,11 @@
                 const customIcon = L.divIcon({ html: iconHtml, className: '', iconSize: [24, 24], iconAnchor: [12, 12] });
                 
                 const marker = L.marker([vessel.lat, vessel.lng], { icon: customIcon }).addTo(vesselMarkers);
-                
-                // Attach click event to fetch extended data
                 marker.on('click', () => fetchExtendedDetails(vessel.mmsi, marker));
             });
         }
         
         async function fetchExtendedDetails(mmsi, marker) {
-            // Show loading state in popup
             marker.bindPopup("<h3>Loading details...</h3>").openPopup();
 
             const targetApiUrl = `https://api.myshiptracking.com/api/v2/vessel?mmsi=${mmsi}&response=extended`;
@@ -328,7 +346,30 @@
                 <p><strong>Built:</strong> <span>${vessel.built || 'N/A'}</span></p>
                 <p><strong>Destination:</strong> ${destination}</p>
                 <p><strong>ETA:</strong> ${eta}</p>
+                <button class="popup-button" onclick="fetchVesselTrack(${vessel.mmsi})">Show 24h Track</button>
             `;
+        }
+        
+        async function fetchVesselTrack(mmsi) {
+            const loader = document.getElementById('loader');
+            loader.style.display = 'block';
+            map.closePopup(); // Close popup while track loads
+
+            const todate = new Date().toISOString();
+            const fromdate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+            
+            const targetApiUrl = `https://api.myshiptracking.com/api/v2/vessel/track?mmsi=${mmsi}&fromdate=${fromdate}&todate=${todate}`;
+            const trackData = await apiRequest(targetApiUrl, `historical track for MMSI ${mmsi}`);
+            
+            if (trackData && trackData.length > 0) {
+                historicalTrackLayer.clearLayers();
+                const latlngs = trackData.map(pos => [pos.lat, pos.lng]);
+                const polyline = L.polyline(latlngs, { color: '#00ff41', weight: 3 });
+                historicalTrackLayer.addLayer(polyline);
+            } else {
+                alert('No historical track data available for this vessel in the last 24 hours.');
+            }
+            loader.style.display = 'none';
         }
 
         function filterVessels(vesselType) {
@@ -345,6 +386,7 @@
             document.getElementById('reset-button-container').innerHTML = '';
             
             vesselMarkers.clearLayers();
+            historicalTrackLayer.clearLayers();
             currentVessels = [];
             map.flyTo([20, 0], 2);
         }
