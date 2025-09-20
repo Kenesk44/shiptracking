@@ -33,6 +33,7 @@
         }
         .leaflet-popup-content {
             font-family: 'Roboto Mono', monospace;
+            min-width: 240px;
         }
         .leaflet-popup-content h3 {
             color: #00ff41;
@@ -42,6 +43,11 @@
         .leaflet-popup-content p {
             margin: 4px 0;
             font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .leaflet-popup-content p strong {
+            color: #aaa;
         }
         .leaflet-popup-tip {
             background: rgba(10, 10, 10, 0.9);
@@ -167,7 +173,6 @@
         });
 
         function initializeMap() {
-            // Set initial view to a global perspective
             map = L.map('map').setView([20, 0], 2); 
 
             L.tileLayer(
@@ -178,7 +183,6 @@
 
             vesselMarkers.addTo(map);
             addControls();
-            // REMOVED: No initial fetch of vessels
         }
         
         function addControls() {
@@ -206,7 +210,6 @@
             });
             new ControlPanel({ position: 'topright' }).addTo(map);
             
-            // Add event listeners
             document.getElementById('vesselType').addEventListener('change', (e) => filterVessels(e.target.value));
             document.getElementById('search').addEventListener('keyup', (e) => {
                 if (e.key === 'Enter') {
@@ -222,15 +225,9 @@
                 const response = await fetch(proxyUrl);
                 const result = await response.json(); 
 
-                if (!response.ok) {
-                    throw new Error(result.message || `Proxy Error: ${response.statusText}`);
-                }
-
-                if (result.status === 'success') {
-                    return result.data;
-                } else {
-                    throw new Error(result.message || 'An unknown API error occurred.');
-                }
+                if (!response.ok) throw new Error(result.message || `Proxy Error: ${response.statusText}`);
+                if (result.status === 'success') return result.data;
+                else throw new Error(result.message || 'An unknown API error occurred.');
             } catch (error) {
                 handleFetchError(error, context);
                 return null;
@@ -249,7 +246,7 @@
             const searchResults = await apiRequest(targetApiUrl, "vessel search");
 
             if (searchResults && searchResults.length > 0) {
-                await fetchVesselDetails(searchResults);
+                await fetchVesselDetails(searchResults, true); // true = this is a new search
             } else if (searchResults) { 
                 alert(`No vessels found for "${query}".`);
                 vesselMarkers.clearLayers();
@@ -257,23 +254,24 @@
             loader.style.display = 'none';
         }
 
-        async function fetchVesselDetails(searchResults) {
-            const mmsiList = searchResults.map(v => v.mmsi).join(',');
+        async function fetchVesselDetails(vessels, isNewSearch) {
+            const mmsiList = vessels.map(v => v.mmsi).join(',');
             const targetApiUrl = `https://api.myshiptracking.com/api/v2/vessel/bulk?mmsi=${mmsiList}`;
             
             const vesselDetails = await apiRequest(targetApiUrl, "vessel details");
 
             if (vesselDetails) {
-                currentVessels = vesselDetails; // Store for filtering
+                currentVessels = vesselDetails;
                 plotVessels(currentVessels);
                 
-                const bounds = L.latLngBounds(currentVessels.map(v => [v.lat, v.lng]).filter(coords => coords[0] != null && coords[1] != null));
-                if (bounds.isValid()) {
-                    map.flyToBounds(bounds, { padding: [50, 50] });
+                if (isNewSearch) {
+                    const bounds = L.latLngBounds(currentVessels.map(v => [v.lat, v.lng]).filter(coords => coords[0] != null && coords[1] != null));
+                    if (bounds.isValid()) {
+                        map.flyToBounds(bounds, { padding: [50, 50] });
+                    }
+                    document.getElementById('vesselType').disabled = false;
+                    addResetButton();
                 }
-                
-                document.getElementById('vesselType').disabled = false; // Enable filter
-                addResetButton();
             }
         }
 
@@ -284,23 +282,55 @@
 
             vessels.forEach(vessel => {
                 if (vessel.lat == null || vessel.lng == null) return;
+
                 const color = vesselTypeColors[vessel.vtype] || vesselTypeColors[9];
                 const iconHtml = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="${color}" style="transform: rotate(${vessel.course || 0}deg);"><path d="M12 2L2.5 21.5h19L12 2z"/></svg>`;
                 const customIcon = L.divIcon({ html: iconHtml, className: '', iconSize: [24, 24], iconAnchor: [12, 12] });
                 
-                const popupContent = `
-                    <h3>${vessel.vessel_name || 'N/A'}</h3>
-                    <p><strong>MMSI:</strong> ${vessel.mmsi}</p>
-                    <p><strong>Type:</strong> ${vesselTypeMapping[vessel.vtype] || 'Unknown'}</p>
-                    <p><strong>Speed:</strong> ${vessel.speed != null ? vessel.speed + ' knots' : 'N/A'}</p>
-                `;
-
-                L.marker([vessel.lat, vessel.lng], { icon: customIcon })
-                    .addTo(vesselMarkers)
-                    .bindPopup(popupContent);
+                const marker = L.marker([vessel.lat, vessel.lng], { icon: customIcon }).addTo(vesselMarkers);
+                
+                // Attach click event to fetch extended data
+                marker.on('click', () => fetchExtendedDetails(vessel.mmsi, marker));
             });
         }
         
+        async function fetchExtendedDetails(mmsi, marker) {
+            // Show loading state in popup
+            marker.bindPopup("<h3>Loading details...</h3>").openPopup();
+
+            const targetApiUrl = `https://api.myshiptracking.com/api/v2/vessel?mmsi=${mmsi}&response=extended`;
+            const data = await apiRequest(targetApiUrl, `extended details for MMSI ${mmsi}`);
+
+            if (data) {
+                const content = createExtendedPopupContent(data);
+                marker.bindPopup(content).openPopup();
+            } else {
+                marker.bindPopup("<h3>Could not load details.</h3><p>Please try again later.</p>").openPopup();
+            }
+        }
+
+        function createExtendedPopupContent(vessel) {
+            const na = '<span>N/A</span>';
+            const size = (vessel.size_a && vessel.size_b && vessel.size_c && vessel.size_d) 
+                ? `<span>${vessel.size_a + vessel.size_b}m x ${vessel.size_c + vessel.size_d}m</span>` : na;
+            const tonnage = (vessel.gt && vessel.dwt) ? `<span>${vessel.gt} / ${vessel.dwt}</span>` : na;
+            const destination = vessel.destination ? `<span>${vessel.destination}</span>` : na;
+            const eta = vessel.eta ? `<span>${new Date(vessel.eta).toLocaleString()}</span>` : na;
+
+            return `
+                <h3>${vessel.vessel_name || 'N/A'}</h3>
+                <p><strong>Flag:</strong> <span>${vessel.flag || 'N/A'}</span></p>
+                <p><strong>Callsign:</strong> <span>${vessel.callsign || 'N/A'}</span></p>
+                <p><strong>IMO/MMSI:</strong> <span>${vessel.imo || 'N/A'} / ${vessel.mmsi}</span></p>
+                <p><strong>Type:</strong> <span>${vessel.vessel_type || 'Unknown'}</span></p>
+                <p><strong>Size (L×B):</strong> ${size}</p>
+                <p><strong>Tonnage (GT/DWT):</strong> ${tonnage}</p>
+                <p><strong>Built:</strong> <span>${vessel.built || 'N/A'}</span></p>
+                <p><strong>Destination:</strong> ${destination}</p>
+                <p><strong>ETA:</strong> ${eta}</p>
+            `;
+        }
+
         function filterVessels(vesselType) {
             let filteredVessels = (vesselType === 'all')
                 ? currentVessels
@@ -316,7 +346,7 @@
             
             vesselMarkers.clearLayers();
             currentVessels = [];
-            map.flyTo([20, 0], 2); // Fly back to global view
+            map.flyTo([20, 0], 2);
         }
         
         function addResetButton() {
