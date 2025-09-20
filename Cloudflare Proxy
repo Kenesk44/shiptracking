@@ -1,0 +1,43 @@
+/**
+ * Welcome to your new Cloudflare Worker!
+ *
+ * This worker acts as a secure proxy to the MyShipTracking API.
+ * It does two things:
+ * 1. It adds your secret API key to every request on the server-side, so it's never exposed in the browser.
+ * 2. It solves the CORS issue by adding the necessary headers to the response.
+ *
+ * To deploy, follow the instructions at: https://developers.cloudflare.com/workers/get-started/guide
+ */
+
+export default {
+  async fetch(request, env, ctx) {
+    // 1. Get the target API URL from the query string
+    const url = new URL(request.url);
+    const targetApiUrl = url.searchParams.get('url');
+
+    if (!targetApiUrl) {
+      return new Response('Error: "url" query parameter is missing.', { status: 400 });
+    }
+
+    // 2. Create a new request object to forward to the API
+    const apiRequest = new Request(targetApiUrl, {
+      headers: {
+        // IMPORTANT: Your MyShipTracking API Key is stored as a secret environment variable in Cloudflare.
+        // It is NOT passed from the browser.
+        'Authorization': `Bearer ${env.MYSHIPTRACKING_API_KEY}`,
+        'User-Agent': 'ShipsDNA-Proxy-Worker/1.0'
+      }
+    });
+
+    // 3. Fetch the data from the actual API
+    const apiResponse = await fetch(apiRequest);
+
+    // 4. Create a new response, adding the crucial CORS headers
+    const response = new Response(apiResponse.body, apiResponse);
+    response.headers.set('Access-Control-Allow-Origin', '*'); // Allows any domain to access this worker
+    response.headers.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type');
+
+    return response;
+  },
+};
