@@ -363,9 +363,21 @@
             
             if (trackData && trackData.length > 0) {
                 historicalTrackLayer.clearLayers();
-                const latlngs = trackData.map(pos => [pos.lat, pos.lng]);
-                const polyline = L.polyline(latlngs, { color: '#00ff41', weight: 3 });
-                historicalTrackLayer.addLayer(polyline);
+                // Filter out any points with invalid coordinates before drawing
+                const latlngs = trackData
+                    .map(pos => [pos.lat, pos.lng])
+                    .filter(coord => coord[0] != null && coord[1] != null);
+
+                if (latlngs.length > 1) {
+                    const polyline = L.polyline(latlngs, { color: '#00ff41', weight: 3 });
+                    historicalTrackLayer.addLayer(polyline);
+                    
+                    // Auto-zoom to the track bounds
+                    const trackBounds = L.latLngBounds(latlngs);
+                    map.flyToBounds(trackBounds, { padding: [50, 50] });
+                } else {
+                     alert('Not enough valid track data to draw a path for this vessel.');
+                }
             } else {
                 alert('No historical track data available for this vessel in the last 24 hours.');
             }
