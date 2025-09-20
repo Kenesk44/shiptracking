@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShipsDNA - AIS Ship Tracking</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <style>
+        /* Basic page styles */
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #1a1a1a;
+        }
+
+        /* Set the map container to fill the screen */
+        #map {
+            width: 100%;
+            height: 100%;
+            background-color: #1a1a1a;
+        }
+
+        /* Custom popup styles to match the dark theme */
+        .leaflet-popup-content-wrapper {
+            background: rgba(10, 10, 10, 0.9);
+            color: #e0e0e0;
+            border: 1px solid #008a23;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 255, 65, 0.3);
+        }
+        .leaflet-popup-content {
+            font-family: 'Roboto Mono', monospace;
+        }
+        .leaflet-popup-content h3 {
+            color: #00ff41;
+            margin: 0 0 8px 0;
+            font-size: 16px;
+        }
+        .leaflet-popup-content p {
+            margin: 4px 0;
+            font-size: 12px;
+        }
+        .leaflet-popup-tip {
+            background: rgba(10, 10, 10, 0.9);
+        }
+        .leaflet-popup-close-button {
+            color: #e0e0e0 !important;
+        }
+
+        /* Styles for the UI control panel */
+        .leaflet-top.leaflet-right {
+            top: 10px;
+            right: 10px;
+        }
+        .control-panel {
+            background: rgba(10, 10, 10, 0.85);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #008a23;
+            box-shadow: 0 0 15px rgba(0, 255, 65, 0.3);
+            color: #e0e0e0;
+            width: 250px;
+        }
+        .control-panel h3 {
+            margin: 0 0 10px 0;
+            color: #00ff41;
+            font-size: 16px;
+        }
+        .control-panel input, .control-panel select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            border: 1px solid #008a23;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+        }
+        .control-panel label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        
+        /* Loading Spinner */
+        #loader {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 8px solid #f3f3f3;
+            border-top: 8px solid #00ff41;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 2s linear infinite;
+            z-index: 1001; /* Above map, below popups */
+            display: none; /* Hidden by default */
+        }
+
+        @keyframes spin {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+    <div id="loader"></div>
+
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+        // --- Configuration ---
+        const MAPTILER_API_KEY = 'onN3ELJ8eYBkrJfTNMbC';
+        // The MyShipTracking API Key is now handled by the proxy worker for security.
+        // You will set it up in your Cloudflare Worker dashboard.
+        const PROXY_WORKER_URL = 'https://shipsdna-proxy.falling-flower-03ee.workers.dev/'; 
+
+        // --- Global Variables ---
+        let map;
+        let allVessels = []; // To store the full dataset from the API
+        let vesselMarkers = L.layerGroup(); // Layer to hold all vessel markers
+
+        // --- Mappings ---
+        const vesselTypeMapping = {
+            6: 'Passenger/Cruise', 7: 'Cargo/Container', 8: 'Tanker', 9: 'Other' // Can be expanded
+        };
+        const vesselTypeColors = {
+            6: '#ff4da6', 7: '#4da6ff', 8: '#ffa64d', 9: '#cccccc'
+        };
+
+        // --- UI & Map Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            if (MAPTILER_API_KEY === 'YOUR_MAPTILER_API_KEY_HERE' || PROXY_WORKER_URL === 'YOUR_CLOUDFLARE_WORKER_URL_HERE') {
+                document.getElementById('map').innerHTML = `
+                    <div style="height: 100%; display: flex; align-items: center; justify-content: center; background-color: #333; color: white; text-align: center;">
+                        <h2>Please provide a MapTiler API key and the Cloudflare Worker URL in the script to start.</h2>
+                    </div>`;
+                return;
+            }
+            initializeMap();
+        });
+
+        function initializeMap() {
+            map = L.map('map').setView([50.5, 1.0], 7); // Centered on the English Channel
+
+            L.tileLayer(
+                `https://api.maptiler.com/maps/dataviz-dark/{z}/{x}/{y}.png?key=${MAPTILER_API_KEY}`, {
+                    attribution: '<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>',
+                }
+            ).addTo(map);
+
+            vesselMarkers.addTo(map);
+            addControls();
+            fetchVesselsInZone();
+        }
+        
+        function addControls() {
+            const ControlPanel = L.Control.extend({
+                onAdd: function(map) {
+                    const container = L.DomUtil.create('div', 'control-panel');
+                    container.innerHTML = `
+                        <h3>Ship Tracking</h3>
+                        <label for="search">Search (IMO/MMSI/Name)</label>
+                        <input type="text" id="search" placeholder="e.g., 9811000" disabled>
+                        
+                        <label for="vesselType">Filter by Type</label>
+                        <select id="vesselType">
+                            <option value="all">All Types</option>
+                            <option value="6">Passenger/Cruise</option>
+                            <option value="7">Cargo/Container</option>
+                            <option value="8">Tanker</option>
+                            <option value="9">Other</option>
+                        </select>
+                    `;
+                    L.DomEvent.disableClickPropagation(container);
+                    return container;
+                }
+            });
+            new ControlPanel({ position: 'topright' }).addTo(map);
+            
+            // Add event listener for the filter dropdown
+            document.getElementById('vesselType').addEventListener('change', (e) => {
+                filterVessels(e.target.value);
+            });
+        }
+
+        // --- API & Data Handling ---
+        async function fetchVesselsInZone() {
+            const loader = document.getElementById('loader');
+            loader.style.display = 'block';
+
+            // Bounding box for the English Channel / North Sea
+            const minlon = -5.0;
+            const maxlon = 5.0;
+            const minlat = 48.5;
+            const maxlat = 52.5;
+
+            // Construct the target API URL
+            const targetApiUrl = `https://api.myshiptracking.com/api/v2/vessel/zone?minlon=${minlon}&maxlon=${maxlon}&minlat=${minlat}&maxlat=${maxlat}`;
+            
+            // The request now goes to our secure proxy worker
+            const proxyUrl = `${PROXY_WORKER_URL}?url=${encodeURIComponent(targetApiUrl)}`;
+
+            try {
+                // We no longer need to send the Authorization header from the browser
+                const response = await fetch(proxyUrl);
+
+                if (!response.ok) {
+                    throw new Error(`Proxy Error: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+
+                if (result.status === 'success' && result.data) {
+                    allVessels = result.data;
+                    plotVessels(allVessels);
+                } else {
+                    console.error("API returned an error via proxy:", result.message);
+                    alert(`Could not fetch vessel data: ${result.message || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error("Failed to fetch vessels via proxy:", error);
+                alert("An error occurred while fetching vessel data. Check the console for details.");
+            } finally {
+                loader.style.display = 'none';
+            }
+        }
+        
+        // --- Vessel Plotting & Filtering ---
+        function plotVessels(vessels) {
+            vesselMarkers.clearLayers(); // Clear previous markers
+
+            vessels.forEach(vessel => {
+                const color = vesselTypeColors[vessel.vtype] || vesselTypeColors[9];
+                const iconHtml = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="${color}" style="transform: rotate(${vessel.course}deg);"><path d="M12 2L2.5 21.5h19L12 2z"/></svg>`;
+                const customIcon = L.divIcon({ html: iconHtml, className: '', iconSize: [24, 24], iconAnchor: [12, 12] });
+                
+                const popupContent = `
+                    <h3>${vessel.vessel_name}</h3>
+                    <p><strong>MMSI:</strong> ${vessel.mmsi}</p>
+                    <p><strong>Type:</strong> ${vesselTypeMapping[vessel.vtype] || 'Unknown'}</p>
+                    <p><strong>Speed:</strong> ${vessel.speed} knots</p>
+                `;
+
+                L.marker([vessel.lat, vessel.lng], { icon: customIcon })
+                    .addTo(vesselMarkers)
+                    .bindPopup(popupContent);
+            });
+        }
+        
+        function filterVessels(vesselType) {
+            let filteredVessels = [];
+            if (vesselType === 'all') {
+                filteredVessels = allVessels;
+            } else {
+                filteredVessels = allVessels.filter(vessel => vessel.vtype == parseInt(vesselType));
+            }
+            plotVessels(filteredVessels);
+        }
+
+    </script>
+</body>
+</html>
