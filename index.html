@@ -169,12 +169,69 @@
             0% { transform: translate(-50%, -50%) rotate(0deg); }
             100% { transform: translate(-50%, -50%) rotate(360deg); }
         }
+
+        /* Custom Alert Modal */
+        .alert-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+        .alert-overlay.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .alert-modal {
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #008a23;
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.4);
+            text-align: center;
+            width: 90%;
+            max-width: 400px;
+            color: #e0e0e0;
+        }
+        .alert-modal h4 {
+            color: #00ff41;
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        .alert-modal p {
+            margin-bottom: 20px;
+        }
+        .alert-modal button {
+            padding: 10px 20px;
+            border: 1px solid #00ff41;
+            background: #00ff41;
+            color: #1a1a1a;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
     </style>
 </head>
 <body>
 
     <div id="map"></div>
     <div id="loader"></div>
+    <div id="custom-alert" class="alert-overlay">
+        <div class="alert-modal">
+            <h4 id="alert-title"></h4>
+            <p id="alert-message"></p>
+            <button id="alert-ok">OK</button>
+        </div>
+    </div>
 
     <!-- Leaflet JavaScript -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -208,6 +265,9 @@
                 return;
             }
             initializeMap();
+            document.getElementById('alert-ok').addEventListener('click', () => {
+                document.getElementById('custom-alert').classList.remove('visible');
+            });
         });
 
         function initializeMap() {
@@ -293,7 +353,7 @@
         }
 
         async function searchVessels(query) {
-            if (query.length < 3) return alert('Please enter at least 3 characters to search.');
+            if (query.length < 3) return showCustomAlert('Search Error', 'Please enter at least 3 characters to search.');
             document.getElementById('loader').style.display = 'block';
 
             const targetApiUrl = `https://api.myshiptracking.com/api/v2/vessel/search?name=${encodeURIComponent(query)}`;
@@ -302,21 +362,21 @@
             if (searchResults && searchResults.length > 0) {
                 await fetchVesselDetails(searchResults.map(v => v.mmsi), true);
             } else if (searchResults) { 
-                alert(`No vessels found for "${query}".`);
+                showCustomAlert('Not Found', `No vessels found for "${query}".`);
                 vesselMarkers.clearLayers();
             }
             document.getElementById('loader').style.display = 'none';
         }
 
         async function searchPort(query) {
-            if (query.length < 3) return alert('Please enter at least 3 characters to search for a port.');
+            if (query.length < 3) return showCustomAlert('Search Error', 'Please enter at least 3 characters to search for a port.');
             document.getElementById('loader').style.display = 'block';
 
             const portSearchUrl = `https://api.myshiptracking.com/api/v2/port/search?name=${encodeURIComponent(query)}`;
             const portResults = await apiRequest(portSearchUrl, `port search for "${query}"`);
 
             if (!portResults || portResults.length === 0) {
-                alert(`Port "${query}" not found.`);
+                showCustomAlert('Not Found', `Port "${query}" not found.`);
                 document.getElementById('loader').style.display = 'none';
                 return;
             }
@@ -326,7 +386,7 @@
             const vesselsInPort = await apiRequest(vesselsInPortUrl, `vessels in port ${portResults[0].name}`);
 
             if (!vesselsInPort || vesselsInPort.length === 0) {
-                alert(`No vessels are currently in the port of ${portResults[0].name}.`);
+                showCustomAlert('No Vessels', `No vessels are currently in the port of ${portResults[0].name}.`);
                 document.getElementById('loader').style.display = 'none';
                 return;
             }
@@ -335,7 +395,6 @@
             document.getElementById('loader').style.display = 'none';
         }
 
-        // --- BATCHING LOGIC to handle API limit of 100 vessels per request ---
         async function fetchVesselDetails(mmsiList, isNewSearch) {
             const BATCH_SIZE = 100;
             const batches = [];
@@ -350,7 +409,7 @@
                 });
                 
                 const results = await Promise.all(batchPromises);
-                const vesselDetails = results.flat().filter(Boolean); // Flatten arrays and remove any null results from failed batches
+                const vesselDetails = results.flat().filter(Boolean); 
 
                 if (vesselDetails.length > 0) {
                     currentVessels = vesselDetails;
@@ -367,7 +426,6 @@
                     }
                 }
             } catch (error) {
-                 // handleFetchError is already called inside apiRequest, so just log here.
                  console.error("An error occurred during batch processing of vessel details.");
             }
         }
@@ -425,10 +483,10 @@
                     const trackBounds = L.latLngBounds(latlngs);
                     map.flyToBounds(trackBounds, { padding: [50, 50] });
                 } else {
-                     alert('Not enough valid track data to draw a path for this vessel.');
+                     showCustomAlert('Track Error', 'Not enough valid track data to draw a path for this vessel.');
                 }
             } else {
-                alert('No historical track data available for this vessel in the last 24 hours.');
+                showCustomAlert('Track Error', 'No historical track data available for this vessel in the last 24 hours.');
             }
             document.getElementById('loader').style.display = 'none';
         }
@@ -458,7 +516,13 @@
         
         function handleFetchError(error, context) {
             console.error(`Failed to fetch ${context}:`, error);
-            alert(`An error occurred while fetching ${context}: ${error.message}`);
+            showCustomAlert('API Error', `An error occurred while fetching ${context}: ${error.message}`);
+        }
+        
+        function showCustomAlert(title, message) {
+            document.getElementById('alert-title').textContent = title;
+            document.getElementById('alert-message').textContent = message;
+            document.getElementById('custom-alert').classList.add('visible');
         }
 
     </script>
