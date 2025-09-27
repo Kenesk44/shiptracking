@@ -462,7 +462,8 @@
             const tonnage = (vessel.gt && vessel.dwt) ? `<span>${vessel.gt} / ${vessel.dwt}</span>` : na;
             const destination = vessel.destination ? `<span>${vessel.destination}</span>` : na;
             const eta = vessel.eta ? `<span>${new Date(vessel.eta).toLocaleString()}</span>` : na;
-            return `<h3>${vessel.vessel_name || 'N/A'}</h3><p><strong>Flag:</strong> <span>${vessel.flag || 'N/A'}</span></p><p><strong>Callsign:</strong> <span>${vessel.callsign || 'N/A'}</span></p><p><strong>IMO/MMSI:</strong> <span>${vessel.imo || 'N/A'} / ${vessel.mmsi}</span></p><p><strong>Type:</strong> <span>${vessel.vessel_type || 'Unknown'}</span></p><p><strong>Size (L×B):</strong> ${size}</p><p><strong>Tonnage (GT/DWT):</strong> ${tonnage}</p><p><strong>Built:</strong> <span>${vessel.built || 'N/A'}</span></p><p><strong>Destination:</strong> ${destination}</p><p><strong>ETA:</strong> ${eta}</p><button class="popup-button" onclick="fetchVesselTrack(${vessel.mmsi})">Show 24h Track</button>`;
+            // Updated button text
+            return `<h3>${vessel.vessel_name || 'N/A'}</h3><p><strong>Flag:</strong> <span>${vessel.flag || 'N/A'}</span></p><p><strong>Callsign:</strong> <span>${vessel.callsign || 'N/A'}</span></p><p><strong>IMO/MMSI:</strong> <span>${vessel.imo || 'N/A'} / ${vessel.mmsi}</span></p><p><strong>Type:</strong> <span>${vessel.vessel_type || 'Unknown'}</span></p><p><strong>Size (L×B):</strong> ${size}</p><p><strong>Tonnage (GT/DWT):</strong> ${tonnage}</p><p><strong>Built:</strong> <span>${vessel.built || 'N/A'}</span></p><p><strong>Destination:</strong> ${destination}</p><p><strong>ETA:</strong> ${eta}</p><button class="popup-button" onclick="fetchVesselTrack(${vessel.mmsi})">Show 7-Day Track</button>`;
         }
         
         async function fetchVesselTrack(mmsi) {
@@ -470,10 +471,12 @@
             map.closePopup();
             
             const todate = new Date().toISOString().split('.')[0] + 'Z';
-            const fromdate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('.')[0] + 'Z';
+            // Updated to 7 days
+            const fromdate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('.')[0] + 'Z';
 
             const targetApiUrl = `https://api.myshiptracking.com/api/v2/vessel/track?mmsi=${mmsi}&fromdate=${fromdate}&todate=${todate}`;
             const trackData = await apiRequest(targetApiUrl, `historical track for MMSI ${mmsi}`);
+            
             if (trackData && trackData.length > 0) {
                 historicalTrackLayer.clearLayers();
                 const latlngs = trackData.map(pos => [pos.lat, pos.lng]).filter(coord => coord[0] != null && coord[1] != null);
@@ -486,7 +489,8 @@
                      showCustomAlert('Track Error', 'Not enough valid track data to draw a path for this vessel.');
                 }
             } else {
-                showCustomAlert('Track Error', 'No historical track data available for this vessel in the last 24 hours.');
+                // Updated alert message
+                showCustomAlert('Track Error', 'No historical track data available for this vessel in the last 7 days.');
             }
             document.getElementById('loader').style.display = 'none';
         }
